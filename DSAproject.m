@@ -108,14 +108,15 @@ else
     warning('No dsa.mat found in repo root or demos/. Plotting landmarks only.');
 end
 
-%% 3. Build a simple occupancy grid (for saving / downstream reference)
+%% 3. Build occupancy grid (Task 1 version)
 % Grid coding:
-%   0 = free
+%   0 = free space
 %   1 = key point
 %   2 = signal point
 %   3 = obstacle
-res = 1;      % 1 meter / cell
-pad = 50;     % padding around occupied region
+
+res = 5;      % keep consistent with report
+pad = 20;
 
 if isempty(track_x)
     all_x_for_grid = lm_x(:);
@@ -128,26 +129,70 @@ end
 xr = [floor(min(all_x_for_grid)) - pad, ceil(max(all_x_for_grid)) + pad];
 yr = [floor(min(all_y_for_grid)) - pad, ceil(max(all_y_for_grid)) + pad];
 
-cols = ceil((xr(2) - xr(1)) / res) + 1;
-rows = ceil((yr(2) - yr(1)) / res) + 1;
+cols = floor((xr(2) - xr(1)) / res) + 1;
+rows = floor((yr(2) - yr(1)) / res) + 1;
 
 G = zeros(rows, cols, 'uint8');
 
-% Write point categories into the grid
+% Mark key points
 for i = key_idx(:)'
     [r, c] = localXYToRC(lm_x(i), lm_y(i), xr, yr, res, rows, cols);
     G(r, c) = uint8(1);
 end
 
+% Mark signal points
 for i = signal_idx(:)'
     [r, c] = localXYToRC(lm_x(i), lm_y(i), xr, yr, res, rows, cols);
     G(r, c) = uint8(2);
 end
 
+% Mark obstacles as a small occupied area
+obs_radius_cells = 1;
 for i = obstacle_idx(:)'
-    [r, c] = localXYToRC(lm_x(i), lm_y(i), xr, yr, res, rows, cols);
-    G(r, c) = uint8(3);
+    [r0, c0] = localXYToRC(lm_x(i), lm_y(i), xr, yr, res, rows, cols);
+
+    rmin = max(1, r0 - obs_radius_cells);
+    rmax = min(rows, r0 + obs_radius_cells);
+    cmin = max(1, c0 - obs_radius_cells);
+    cmax = min(cols, c0 + obs_radius_cells);
+
+    G(rmin:rmax, cmin:cmax) = uint8(3);
 end
+
+for i = obstacle_idx(:)'
+    [r0, c0] = localXYToRC(lm_x(i), lm_y(i), xr, yr, res, rows, cols);
+
+    rmin = max(1, r0 - obs_radius_cells);
+    rmax = min(rows, r0 + obs_radius_cells);
+    cmin = max(1, c0 - obs_radius_cells);
+    cmax = min(cols, c0 + obs_radius_cells);
+
+    G(rmin:rmax, cmin:cmax) = uint8(3);
+end
+
+% Build a display grid that looks more like a classic occupancy grid
+% Gshow coding:
+%   0 = free (observed track area)
+%   1 = key
+%   2 = signal
+%   3 = obstacle
+%   4 = unknown
+
+Gshow = 4 * ones(rows, cols, 'uint8');   % unknown everywhere at first
+
+% Mark traversed GPS cells as free
+if ~isempty(track_x)
+    for k = 1:numel(track_x)
+        [r, c] = localXYToRC(track_x(k), track_y(k), xr, yr, res, rows, cols);
+        Gshow(r, c) = uint8(0);
+    end
+end
+
+% Overlay key, signal, obstacle on top
+Gshow(G == 1) = uint8(1);
+Gshow(G == 2) = uint8(2);
+Gshow(G == 3) = uint8(3);
+
 
 %% 4. Plot (keep teammate's improved visual style)
 figure('Position', [50 50 1200 900], 'Color', 'k');
@@ -254,6 +299,43 @@ axis equal tight;
 grid on;
 set(gca, 'GridColor', [0.25 0.25 0.25]);
 hold off;
+
+%% 4.5 Visualise occupancy grid
+figure('Position', [150 80 900 700], 'Color', 'w');
+imagesc([xr(1) xr(2)], [yr(1) yr(2)], flipud(G));
+axis equal tight;
+set(gca, 'YDir', 'normal');
+
+% 0 = free, 1 = key, 2 = signal, 3 = obstacle
+colormap([1 1 1; 0 1 1; 1 1 0; 1 0.4 0]);
+
+cb = colorbar;
+cb.Ticks = [0.375 1.125 1.875 2.625];
+cb.TickLabels = {'Free', 'Key', 'Signal', 'Obstacle'};
+
+title(sprintf('Occupancy Grid (resolution = %d m/cell)', res));
+xlabel('X (meters)');
+ylabel('Y (meters)');
+grid on;
+
+%% 4.5 Visualise occupancy grid
+figure('Position', [150 80 900 700], 'Color', 'w');
+imagesc([xr(1) xr(2)], [yr(1) yr(2)], flipud(Gshow));
+axis equal tight;
+set(gca, 'YDir', 'normal');
+
+% 0 = free, 1 = key, 2 = signal, 3 = obstacle, 4 = unknown
+colormap([1 1 1; 0 1 1; 1 1 0; 1 0.4 0; 0.85 0.85 0.85]);
+
+cb = colorbar;
+cb.Ticks = [0.4 1.2 2.0 2.8 3.6];
+cb.TickLabels = {'Free', 'Key', 'Signal', 'Obstacle', 'Unknown'};
+
+title(sprintf('Occupancy Grid (resolution = %d m/cell)', res));
+xlabel('X (meters)');
+ylabel('Y (meters)');
+grid on;
+set(gca, 'GridColor', [0.7 0.7 0.7]);
 
 %% 5. Save merged map data
 save(fullfile(repoRoot, 'qeop_map_data.mat'), ...
