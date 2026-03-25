@@ -1,8 +1,8 @@
 %% QEOP Map Visualisation (Fused Version)
-%  Display-friendly map for Task 1
-%  - Keeps the improved GPS-track visual style
-%  - Still uses load_points_from_task1() as the standard data interface
-%  - Does NOT break Task 2 structure
+% Display-friendly map for Task 1
+% - Keeps the improved GPS-track visual style
+% - Still uses load_points_from_task1() as the standard data interface
+% - Does NOT break Task 2 structure
 
 clear;
 clc;
@@ -29,7 +29,7 @@ obstacle_idx = find(all_points.type_code == 1);
 % Waiting points (keep your team's visual emphasis)
 waiting_idx = find(ismember(string(all_points.name), ["Marshgate", "OPS", "One Pool Street"]));
 
-% Use Marshgate as origin (consistent with earlier versions)
+% Use Marshgate as origin
 originIdx = find(string(all_points.name) == "Marshgate", 1);
 if isempty(originIdx)
     error('Cannot find "Marshgate" in all_points. Please check make_points_table.m');
@@ -70,7 +70,7 @@ if ~isempty(matPath)
         S = load(matPath);
         pos = localFindPositionData(S);
 
-        [all_lat, all_lon, all_alt, all_t] = localExtractTrackColumns(pos);
+        [all_lat, all_lon, ~, all_t] = localExtractTrackColumns(pos);
 
         track_x = (all_lon - lon0) * m_per_deg_lon;
         track_y = (all_lat - lat0) * m_per_deg_lat;
@@ -109,7 +109,7 @@ else
 end
 
 %% 3. Build occupancy grid (Task 1 version)
-% Grid coding:
+% G coding:
 %   0 = free space
 %   1 = key point
 %   2 = signal point
@@ -159,17 +159,6 @@ for i = obstacle_idx(:)'
     G(rmin:rmax, cmin:cmax) = uint8(3);
 end
 
-for i = obstacle_idx(:)'
-    [r0, c0] = localXYToRC(lm_x(i), lm_y(i), xr, yr, res, rows, cols);
-
-    rmin = max(1, r0 - obs_radius_cells);
-    rmax = min(rows, r0 + obs_radius_cells);
-    cmin = max(1, c0 - obs_radius_cells);
-    cmax = min(cols, c0 + obs_radius_cells);
-
-    G(rmin:rmax, cmin:cmax) = uint8(3);
-end
-
 % Build a display grid that looks more like a classic occupancy grid
 % Gshow coding:
 %   0 = free (observed track area)
@@ -177,8 +166,7 @@ end
 %   2 = signal
 %   3 = obstacle
 %   4 = unknown
-
-Gshow = 4 * ones(rows, cols, 'uint8');   % unknown everywhere at first
+Gshow = 4 * ones(rows, cols, 'uint8');
 
 % Mark traversed GPS cells as free
 if ~isempty(track_x)
@@ -193,9 +181,8 @@ Gshow(G == 1) = uint8(1);
 Gshow(G == 2) = uint8(2);
 Gshow(G == 3) = uint8(3);
 
-
-%% 4. Plot (keep teammate's improved visual style)
-figure('Position', [50 50 1200 900], 'Color', 'k');
+%% 4. Plot main map
+fig1 = figure('Position', [50 50 1200 900], 'Color', 'k');
 hold on;
 set(gca, 'Color', 'k', 'XColor', 'w', 'YColor', 'w');
 
@@ -291,35 +278,15 @@ title('Real Map of QEOP Landmarks & Signal Points', ...
     'FontSize', 14, ...
     'FontWeight', 'bold', ...
     'Color', 'w');
-
 xlabel('X (meters)', 'Color', 'w');
 ylabel('Y (meters)', 'Color', 'w');
-
 axis equal tight;
 grid on;
 set(gca, 'GridColor', [0.25 0.25 0.25]);
 hold off;
 
 %% 4.5 Visualise occupancy grid
-figure('Position', [150 80 900 700], 'Color', 'w');
-imagesc([xr(1) xr(2)], [yr(1) yr(2)], flipud(G));
-axis equal tight;
-set(gca, 'YDir', 'normal');
-
-% 0 = free, 1 = key, 2 = signal, 3 = obstacle
-colormap([1 1 1; 0 1 1; 1 1 0; 1 0.4 0]);
-
-cb = colorbar;
-cb.Ticks = [0.375 1.125 1.875 2.625];
-cb.TickLabels = {'Free', 'Key', 'Signal', 'Obstacle'};
-
-title(sprintf('Occupancy Grid (resolution = %d m/cell)', res));
-xlabel('X (meters)');
-ylabel('Y (meters)');
-grid on;
-
-%% 4.5 Visualise occupancy grid
-figure('Position', [150 80 900 700], 'Color', 'w');
+fig3 = figure('Position', [150 80 900 700], 'Color', 'w');
 imagesc([xr(1) xr(2)], [yr(1) yr(2)], flipud(Gshow));
 axis equal tight;
 set(gca, 'YDir', 'normal');
@@ -337,14 +304,30 @@ ylabel('Y (meters)');
 grid on;
 set(gca, 'GridColor', [0.7 0.7 0.7]);
 
+%% 4.6 Memory analysis
+gridInfo = whos('G');
+numCells = numel(G);
+memoryKB = gridInfo.bytes / 1024;
+memoryMB = gridInfo.bytes / (1024^2);
+
+fprintf('\n=== Occupancy Grid Summary ===\n');
+fprintf('Resolution      : %d m/cell\n', res);
+fprintf('Grid size       : %d rows x %d cols\n', rows, cols);
+fprintf('Number of cells : %d\n', numCells);
+fprintf('Memory for G    : %.2f KB (%.4f MB)\n', memoryKB, memoryMB);
+fprintf('Complexity      : O(rows * cols)\n');
+
 %% 5. Save merged map data
 save(fullfile(repoRoot, 'qeop_map_data.mat'), ...
-    'G', ...
+    'G', 'Gshow', ...
     'points', 'obstacles', 'all_points', ...
     'lm_x', 'lm_y', ...
     'key_idx', 'signal_idx', 'waiting_idx', 'obstacle_idx', ...
     'track_x', 'track_y', 'smooth_x', 'smooth_y', ...
     'res', 'xr', 'yr', 'lat0', 'lon0');
+
+exportgraphics(fig1, fullfile(repoRoot, 'qeop_main_map.png'), 'Resolution', 300);
+exportgraphics(fig3, fullfile(repoRoot, 'qeop_occupancy_grid.png'), 'Resolution', 300);
 
 fprintf('Done! ');
 if isempty(track_x)
@@ -352,7 +335,6 @@ if isempty(track_x)
 else
     fprintf('%d GPS points -> smooth path, Grid: %dx%d\n', numel(track_x), rows, cols);
 end
-
 %% ===== Local helper functions =====
 
 function pos = localFindPositionData(S)
